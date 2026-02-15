@@ -1,6 +1,6 @@
 """
-Utility Municipalization Monitor - Single File Version
-All-in-one Flask application with embedded frontend
+Utility Municipalization Monitor - With PostgreSQL Database
+Persistent storage that survives restarts and refreshes
 """
 
 from flask import Flask, jsonify, request
@@ -8,8 +8,10 @@ from flask_cors import CORS
 from datetime import datetime, timedelta
 import json
 import os
-from pathlib import Path
 import logging
+import psycopg2
+from psycopg2.extras import RealDictCursor
+from urllib.parse import urlparse
 
 # Configure logging
 logging.basicConfig(
@@ -21,13 +23,85 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 CORS(app)
 
-# Data storage directory
-DATA_DIR = Path(os.environ.get('DATA_DIR', 'data'))
-DATA_DIR.mkdir(exist_ok=True)
-MENTIONS_FILE = DATA_DIR / 'mentions.json'
-CRAWL_LOG_FILE = DATA_DIR / 'crawl_log.json'
+# Database connection
+DATABASE_URL = os.environ.get('DATABASE_URL')
 
-# HTML content embedded in the app
+def get_db_connection():
+    """Get database connection"""
+    if not DATABASE_URL:
+        logger.error("DATABASE_URL not set!")
+        return None
+    
+    # Parse database URL (Render provides postgres:// but psycopg2 needs postgresql://)
+    url = DATABASE_URL.replace('postgres://', 'postgresql://', 1)
+    
+    try:
+        conn = psycopg2.connect(url, cursor_factory=RealDictCursor)
+        return conn
+    except Exception as e:
+        logger.error(f"Database connection error: {e}")
+        return None
+
+def init_database():
+    """Initialize database tables"""
+    conn = get_db_connection()
+    if not conn:
+        logger.warning("No database connection - using fallback mode")
+        return False
+    
+    try:
+        cur = conn.cursor()
+        
+        # Create mentions table
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS mentions (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                url TEXT NOT NULL UNIQUE,
+                snippet TEXT,
+                source TEXT,
+                location TEXT,
+                utility TEXT,
+                utility_type TEXT,
+                stage TEXT,
+                priority TEXT,
+                captured_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                status TEXT DEFAULT 'pending',
+                tags TEXT[],
+                notes TEXT,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        # Create index on status for faster queries
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_mentions_status 
+            ON mentions(status)
+        """)
+        
+        # Create index on URL for duplicate checking
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_mentions_url 
+            ON mentions(url)
+        """)
+        
+        conn.commit()
+        cur.close()
+        conn.close()
+        
+        logger.info("Database initialized successfully")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Database initialization error: {e}")
+        if conn:
+            conn.close()
+        return False
+
+# Initialize database on startup
+init_database()
+
+# HTML content (embedded frontend)
 HTML_CONTENT = """<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -185,30 +259,22 @@ HTML_CONTENT = """<!DOCTYPE html>
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                   queries: [
-                    // Core municipalization terms
                     'utility municipalization',
                     'public power initiative',
                     'municipal utility formation',
                     'community choice energy',
-                    
-                    // Legal/regulatory terms
                     'franchise agreement utility expiration',
                     'eminent domain electric utility',
                     'ballot measure municipal utility',
                     'public utility district',
-                    
-                    // Process/action terms
                     'city takeover electric utility',
                     'municipal utility feasibility study',
                     'public ownership utility',
-                    
-                    // Specific initiative types
                     'community choice aggregation',
                     'municipal electric utility referendum',
                     'utility rate increase municipalization'
                   ],
                   max_results_per_query: 10
-
                 })
               });
               const data = await response.json();
@@ -288,7 +354,7 @@ HTML_CONTENT = """<!DOCTYPE html>
                         <h3 style={{ fontSize: '1rem', fontWeight: '600', marginBottom: '0.5rem', color: '#e2e8f0' }}>{mention.title}</h3>
                         <p style={{ fontSize: '0.875rem', color: '#94a3b8', marginBottom: '0.75rem' }}>{mention.snippet}</p>
                         <div style={{ fontSize: '0.75rem', color: '#64748b', marginBottom: '1rem' }}>
-                          📍 {mention.location} | ⚡ {mention.utility} | 🕒 {new Date(mention.capturedAt).toLocaleDateString()}
+                          📍 {mention.location} | ⚡ {mention.utility} | 🕒 {new Date(mention.captured_at).toLocaleDateString()}
                         </div>
                         {view === 'review' && (
                           <div style={{ display: 'flex', gap: '0.5rem' }}>
@@ -311,46 +377,6 @@ HTML_CONTENT = """<!DOCTYPE html>
 </body>
 </html>"""
 
-def load_mentions():
-    """Load mentions from JSON file"""
-    if MENTIONS_FILE.exists():
-        try:
-            with open(MENTIONS_FILE, 'r') as f:
-                return json.load(f)
-        except json.JSONDecodeError:
-            logger.error("Error loading mentions file, returning empty list")
-            return []
-    return []
-
-def save_mentions(mentions):
-    """Save mentions to JSON file"""
-    try:
-        with open(MENTIONS_FILE, 'w') as f:
-            json.dump(mentions, f, indent=2)
-    except Exception as e:
-        logger.error(f"Error saving mentions: {e}")
-
-def load_crawl_log():
-    """Load crawl history"""
-    if CRAWL_LOG_FILE.exists():
-        try:
-            with open(CRAWL_LOG_FILE, 'r') as f:
-                return json.load(f)
-        except json.JSONDecodeError:
-            return []
-    return []
-
-def save_crawl_log(log_entry):
-    """Append to crawl log"""
-    logs = load_crawl_log()
-    logs.append(log_entry)
-    logs = logs[-100:]
-    try:
-        with open(CRAWL_LOG_FILE, 'w') as f:
-            json.dump(logs, f, indent=2)
-    except Exception as e:
-        logger.error(f"Error saving crawl log: {e}")
-
 # Serve frontend
 @app.route('/')
 def index():
@@ -361,70 +387,135 @@ def index():
 @app.route('/api/health', methods=['GET'])
 def health_check():
     """Health check endpoint"""
+    conn = get_db_connection()
+    db_status = 'connected' if conn else 'disconnected'
+    if conn:
+        conn.close()
+    
     return jsonify({
         'status': 'healthy',
         'timestamp': datetime.now().isoformat(),
-        'version': '1.0.0'
+        'version': '2.0.0',
+        'database': db_status
     })
 
 @app.route('/api/mentions', methods=['GET'])
 def get_mentions():
     """Get all mentions with optional filtering"""
+    conn = get_db_connection()
+    if not conn:
+        return jsonify({'error': 'Database not available'}), 500
+    
     try:
-        mentions = load_mentions()
+        cur = conn.cursor()
+        
         status = request.args.get('status')
         location = request.args.get('location')
         priority = request.args.get('priority')
         
-        if status:
-            mentions = [m for m in mentions if m.get('status') == status]
-        if location and location != 'all':
-            mentions = [m for m in mentions if m.get('location') == location]
-        if priority and priority != 'all':
-            mentions = [m for m in mentions if m.get('priority') == priority]
+        query = "SELECT * FROM mentions WHERE 1=1"
+        params = []
         
-        return jsonify(mentions)
+        if status:
+            query += " AND status = %s"
+            params.append(status)
+        if location and location != 'all':
+            query += " AND location = %s"
+            params.append(location)
+        if priority and priority != 'all':
+            query += " AND priority = %s"
+            params.append(priority)
+        
+        query += " ORDER BY captured_at DESC"
+        
+        cur.execute(query, params)
+        mentions = cur.fetchall()
+        
+        # Convert to list of dicts and fix field names
+        result = []
+        for m in mentions:
+            mention_dict = dict(m)
+            # Map database fields to frontend expected fields
+            mention_dict['utilityType'] = mention_dict.pop('utility_type', None)
+            mention_dict['capturedAt'] = mention_dict.pop('captured_at', None)
+            if mention_dict['capturedAt']:
+                mention_dict['capturedAt'] = mention_dict['capturedAt'].isoformat()
+            result.append(mention_dict)
+        
+        cur.close()
+        conn.close()
+        
+        return jsonify(result)
+        
     except Exception as e:
         logger.error(f"Error getting mentions: {e}")
+        if conn:
+            conn.close()
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/mentions/<mention_id>', methods=['PATCH'])
 def update_mention(mention_id):
     """Update a mention"""
+    conn = get_db_connection()
+    if not conn:
+        return jsonify({'error': 'Database not available'}), 500
+    
     try:
-        mentions = load_mentions()
         data = request.json
+        cur = conn.cursor()
         
-        mention_index = next((i for i, m in enumerate(mentions) if str(m.get('id')) == mention_id), None)
+        # Build update query
+        update_fields = []
+        params = []
         
-        if mention_index is not None:
-            allowed_fields = ['status', 'tags', 'notes', 'priority']
-            for field in allowed_fields:
-                if field in data:
-                    mentions[mention_index][field] = data[field]
-            
-            mentions[mention_index]['updated_at'] = datetime.now().isoformat()
-            save_mentions(mentions)
-            return jsonify(mentions[mention_index])
+        if 'status' in data:
+            update_fields.append("status = %s")
+            params.append(data['status'])
+        if 'tags' in data:
+            update_fields.append("tags = %s")
+            params.append(data['tags'])
+        if 'notes' in data:
+            update_fields.append("notes = %s")
+            params.append(data['notes'])
+        if 'priority' in data:
+            update_fields.append("priority = %s")
+            params.append(data['priority'])
+        
+        update_fields.append("updated_at = CURRENT_TIMESTAMP")
+        
+        params.append(mention_id)
+        
+        query = f"UPDATE mentions SET {', '.join(update_fields)} WHERE id = %s RETURNING *"
+        
+        cur.execute(query, params)
+        updated_mention = cur.fetchone()
+        
+        conn.commit()
+        cur.close()
+        conn.close()
+        
+        if updated_mention:
+            result = dict(updated_mention)
+            result['utilityType'] = result.pop('utility_type', None)
+            result['capturedAt'] = result.pop('captured_at', None)
+            if result['capturedAt']:
+                result['capturedAt'] = result['capturedAt'].isoformat()
+            return jsonify(result)
         
         return jsonify({'error': 'Mention not found'}), 404
+        
     except Exception as e:
         logger.error(f"Error updating mention: {e}")
+        if conn:
+            conn.rollback()
+            conn.close()
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/crawl', methods=['POST'])
 def trigger_crawl():
     """Trigger a web crawl"""
     try:
-        try:
-            from crawler import run_crawl
-        except ImportError as ie:
-            logger.error(f"Crawler import error: {ie}")
-            return jsonify({
-                'success': False,
-                'error': 'Crawler module not found',
-                'details': str(ie)
-            }), 500
+        from crawler import run_crawl
         
         data = request.json or {}
         queries = data.get('queries', ['utility municipalization', 'public power initiative'])
@@ -433,22 +524,49 @@ def trigger_crawl():
         logger.info(f"Starting crawl with {len(queries)} queries")
         new_mentions = run_crawl(queries, max_results_per_query)
         
-        existing_mentions = load_mentions()
-        existing_urls = {m.get('url') for m in existing_mentions}
+        # Save to database
+        conn = get_db_connection()
+        if not conn:
+            return jsonify({'success': False, 'error': 'Database not available'}), 500
         
-        unique_new_mentions = [m for m in new_mentions if m.get('url') not in existing_urls]
+        cur = conn.cursor()
         
-        all_mentions = existing_mentions + unique_new_mentions
-        save_mentions(all_mentions)
+        # Get existing URLs to check for duplicates
+        cur.execute("SELECT url FROM mentions")
+        existing_urls = {row['url'] for row in cur.fetchall()}
         
-        log_entry = {
-            'timestamp': datetime.now().isoformat(),
-            'queries': queries,
-            'total_found': len(new_mentions),
-            'new_unique': len(unique_new_mentions),
-            'duplicates': len(new_mentions) - len(unique_new_mentions)
-        }
-        save_crawl_log(log_entry)
+        unique_new_mentions = []
+        for mention in new_mentions:
+            if mention.get('url') not in existing_urls:
+                try:
+                    cur.execute("""
+                        INSERT INTO mentions 
+                        (id, title, url, snippet, source, location, utility, utility_type, stage, priority, status, tags)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        ON CONFLICT (url) DO NOTHING
+                    """, (
+                        mention['id'],
+                        mention['title'],
+                        mention['url'],
+                        mention['snippet'],
+                        mention['source'],
+                        mention['location'],
+                        mention['utility'],
+                        mention['utilityType'],
+                        mention['stage'],
+                        mention['priority'],
+                        mention['status'],
+                        mention.get('tags', [])
+                    ))
+                    unique_new_mentions.append(mention)
+                    existing_urls.add(mention['url'])
+                except Exception as e:
+                    logger.error(f"Error inserting mention: {e}")
+                    continue
+        
+        conn.commit()
+        cur.close()
+        conn.close()
         
         return jsonify({
             'success': True,
@@ -464,39 +582,42 @@ def trigger_crawl():
 @app.route('/api/stats', methods=['GET'])
 def get_stats():
     """Get statistics"""
+    conn = get_db_connection()
+    if not conn:
+        return jsonify({'error': 'Database not available'}), 500
+    
     try:
-        mentions = load_mentions()
-        total = len(mentions)
-        pending = len([m for m in mentions if m.get('status') == 'pending'])
-        approved = len([m for m in mentions if m.get('status') == 'approved'])
-        deleted = len([m for m in mentions if m.get('status') == 'deleted'])
+        cur = conn.cursor()
         
-        today = datetime.now().date()
-        today_captures = 0
-        for m in mentions:
-            try:
-                capture_date = datetime.fromisoformat(m.get('capturedAt', '2000-01-01')).date()
-                if capture_date == today:
-                    today_captures += 1
-            except:
-                pass
+        # Get counts by status
+        cur.execute("SELECT status, COUNT(*) as count FROM mentions GROUP BY status")
+        status_counts = {row['status']: row['count'] for row in cur.fetchall()}
+        
+        # Get today's count
+        cur.execute("""
+            SELECT COUNT(*) as count FROM mentions 
+            WHERE DATE(captured_at) = CURRENT_DATE
+        """)
+        today_count = cur.fetchone()['count']
+        
+        cur.close()
+        conn.close()
         
         return jsonify({
-            'total': total,
-            'pending': pending,
-            'approved': approved,
-            'deleted': deleted,
-            'today_captured': today_captures
+            'total': sum(status_counts.values()),
+            'pending': status_counts.get('pending', 0),
+            'approved': status_counts.get('approved', 0),
+            'deleted': status_counts.get('deleted', 0),
+            'today_captured': today_count
         })
+        
     except Exception as e:
         logger.error(f"Error getting stats: {e}")
+        if conn:
+            conn.close()
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
-    DATA_DIR.mkdir(exist_ok=True)
-    if not MENTIONS_FILE.exists():
-        save_mentions([])
-    
     port = int(os.environ.get('PORT', 5000))
     logger.info(f"Starting Utility Monitor on port {port}")
     app.run(debug=os.environ.get('FLASK_DEBUG', 'False').lower() == 'true', host='0.0.0.0', port=port)
