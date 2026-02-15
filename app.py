@@ -185,14 +185,30 @@ HTML_CONTENT = """<!DOCTYPE html>
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                   queries: [
-                    'municipal utility',
-                    'public power',
-                    'city electric utility',
+                    // Core municipalization terms
                     'utility municipalization',
+                    'public power initiative',
+                    'municipal utility formation',
                     'community choice energy',
-                    'municipal takeover utility'
+                    
+                    // Legal/regulatory terms
+                    'franchise agreement utility expiration',
+                    'eminent domain electric utility',
+                    'ballot measure municipal utility',
+                    'public utility district',
+                    
+                    // Process/action terms
+                    'city takeover electric utility',
+                    'municipal utility feasibility study',
+                    'public ownership utility',
+                    
+                    // Specific initiative types
+                    'community choice aggregation',
+                    'municipal electric utility referendum',
+                    'utility rate increase municipalization'
                   ],
-                  max_results_per_query: 5
+                  max_results_per_query: 10
+
                 })
               });
               const data = await response.json();
