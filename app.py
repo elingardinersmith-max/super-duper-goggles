@@ -148,18 +148,29 @@ HTML_CONTENT = """<!DOCTYPE html>
 
           const handleAction = async (mentionId, action) => {
             try {
+              console.log('Updating mention:', mentionId, 'to status:', action);
               const response = await fetch(`${API_BASE_URL}/mentions/${mentionId}`, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ status: action })
               });
+              
+              console.log('Response status:', response.status);
+              
               if (response.ok) {
+                const data = await response.json();
+                console.log('Update successful:', data);
                 await fetchMentions();
                 await fetchStats();
                 setSelectedMention(null);
+              } else {
+                const errorData = await response.json();
+                console.error('Update failed:', errorData);
+                alert(`Failed to update: ${errorData.error || 'Unknown error'}`);
               }
             } catch (error) {
               console.error('Error updating mention:', error);
+              alert(`Error: ${error.message}`);
             }
           };
 
@@ -173,8 +184,15 @@ HTML_CONTENT = """<!DOCTYPE html>
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                  queries: ['utility municipalization news', 'public power initiative', 'municipal utility ballot', 'franchise agreement utility'],
-                  max_results_per_query: 10
+                  queries: [
+                    'municipal utility',
+                    'public power',
+                    'city electric utility',
+                    'utility municipalization',
+                    'community choice energy',
+                    'municipal takeover utility'
+                  ],
+                  max_results_per_query: 5
                 })
               });
               const data = await response.json();
