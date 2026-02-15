@@ -1,0 +1,158 @@
+# 🚨 QUICK FIX - psycopg2 Python 3.13 Issue
+
+## Problem:
+`ImportError: undefined symbol: _PyInterpreterState_Get`
+
+This means Render is using Python 3.13, but psycopg2-binary doesn't support it yet.
+
+---
+
+## ✅ SOLUTION (2 Options):
+
+### **Option 1: Force Python 3.11 (Recommended)**
+
+1. **Check your `runtime.txt` in GitHub**
+   - It should say: `python-3.11.6`
+   - If it says `python-3.13.x`, change it to `python-3.11.6`
+
+2. **If runtime.txt is already correct:**
+   - Render might be caching the old Python version
+   - Go to Render → Your service
+   - Click **"Manual Deploy"**
+   - Select **"Clear build cache & deploy"**
+   - This forces a fresh install with Python 3.11
+
+3. **Wait 3-4 minutes** for full rebuild
+
+---
+
+### **Option 2: Use psycopg3 Instead**
+
+If Python 3.11 doesn't work, use the newer psycopg3:
+
+1. **Edit `requirements.txt` in GitHub**
+2. **Replace this line:**
+   ```
+   psycopg2-binary==2.9.9
+   ```
+   **With:**
+   ```
+   psycopg==3.1.18
+   ```
+
+3. **Edit `app.py` - Line 12**
+4. **Replace:**
+   ```python
+   import psycopg2
+   from psycopg2.extras import RealDictCursor
+   ```
+   **With:**
+   ```python
+   import psycopg
+   from psycopg.rows import dict_row
+   ```
+
+5. **Edit `app.py` - Line 29 (get_db_connection function)**
+6. **Replace:**
+   ```python
+   conn = psycopg2.connect(url, cursor_factory=RealDictCursor)
+   ```
+   **With:**
+   ```python
+   conn = psycopg.connect(url, row_factory=dict_row)
+   ```
+
+7. **Commit changes**
+
+---
+
+## 🎯 EASIEST FIX (Do This First):
+
+### **Just Clear Build Cache:**
+
+1. **Render Dashboard** → Your service
+2. Click **"Manual Deploy"** (top right)
+3. Select **"Clear build cache & deploy"**
+4. Wait 3-4 minutes
+5. Check logs - should use Python 3.11 now
+
+This usually fixes it!
+
+---
+
+## ✅ After Fix Works:
+
+Your app will have:
+- ✅ PostgreSQL database connection
+- ✅ Persistent data (survives refresh)
+- ✅ URL links on each mention
+- ✅ Enhanced search (14 queries)
+- ✅ No timeout issues
+
+---
+
+## 📋 Checklist Before Deploying Database Version:
+
+Did you:
+- [ ] Create PostgreSQL database on Render?
+- [ ] Copy the "Internal Database URL"?
+- [ ] Add `DATABASE_URL` environment variable to web service?
+- [ ] Upload `app.py` with database code?
+- [ ] Upload `requirements.txt` with psycopg2-binary?
+- [ ] Upload `Procfile` with timeout fix?
+
+If any are missing, the database won't work!
+
+---
+
+## 🔍 Check Your Setup:
+
+### **1. Check DATABASE_URL is Set:**
+
+Render → Your service → Environment tab
+
+Should see:
+```
+DATABASE_URL = postgres://utility_monitor_user:...
+```
+
+If NOT there:
+- You need to create the PostgreSQL database first
+- See DATABASE-SETUP.txt instructions
+
+### **2. Check runtime.txt:**
+
+GitHub → runtime.txt
+
+Should say:
+```
+python-3.11.6
+```
+
+### **3. Check requirements.txt:**
+
+GitHub → requirements.txt
+
+Should include:
+```
+psycopg2-binary==2.9.9
+```
+
+---
+
+## 🚀 Try This NOW:
+
+1. **Go to Render Dashboard**
+2. **Click your service**
+3. **Click "Manual Deploy"**
+4. **Click "Clear build cache & deploy"**
+5. **Wait 4 minutes**
+6. **Check logs** - look for "Database initialized successfully"
+
+If it works: ✅ Done!
+
+If it still fails: Share the new error logs and I'll help fix it.
+
+---
+
+**Most likely: Just clearing the build cache will fix it!**
