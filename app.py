@@ -9,8 +9,8 @@ from datetime import datetime, timedelta
 import json
 import os
 import logging
-import psycopg2
-from psycopg2.extras import RealDictCursor
+import psycopg
+from psycopg.rows import dict_row
 from urllib.parse import urlparse
 
 # Configure logging
@@ -36,7 +36,7 @@ def get_db_connection():
     url = DATABASE_URL.replace('postgres://', 'postgresql://', 1)
     
     try:
-        conn = psycopg2.connect(url, cursor_factory=RealDictCursor)
+conn = psycopg.connect(url, row_factory=dict_row)
         return conn
     except Exception as e:
         logger.error(f"Database connection error: {e}")
