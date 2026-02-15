@@ -353,9 +353,38 @@ HTML_CONTENT = """<!DOCTYPE html>
                         </div>
                         <h3 style={{ fontSize: '1rem', fontWeight: '600', marginBottom: '0.5rem', color: '#e2e8f0' }}>{mention.title}</h3>
                         <p style={{ fontSize: '0.875rem', color: '#94a3b8', marginBottom: '0.75rem' }}>{mention.snippet}</p>
-                        <div style={{ fontSize: '0.75rem', color: '#64748b', marginBottom: '1rem' }}>
+                        <div style={{ fontSize: '0.75rem', color: '#64748b', marginBottom: '0.5rem' }}>
                           📍 {mention.location} | ⚡ {mention.utility} | 🕒 {new Date(mention.captured_at).toLocaleDateString()}
                         </div>
+                        <a 
+                          href={mention.url} 
+                          target="_blank" 
+                          rel="noopener noreferrer" 
+                          style={{ 
+                            display: 'inline-flex', 
+                            alignItems: 'center', 
+                            gap: '0.5rem',
+                            fontSize: '0.875rem', 
+                            color: '#60a5fa', 
+                            textDecoration: 'none',
+                            marginBottom: '1rem',
+                            padding: '0.5rem 0.75rem',
+                            background: 'rgba(59, 130, 246, 0.1)',
+                            borderRadius: '6px',
+                            border: '1px solid rgba(59, 130, 246, 0.2)',
+                            transition: 'all 0.2s'
+                          }}
+                          onMouseOver={(e) => {
+                            e.currentTarget.style.background = 'rgba(59, 130, 246, 0.2)';
+                            e.currentTarget.style.color = '#93c5fd';
+                          }}
+                          onMouseOut={(e) => {
+                            e.currentTarget.style.background = 'rgba(59, 130, 246, 0.1)';
+                            e.currentTarget.style.color = '#60a5fa';
+                          }}
+                        >
+                          🔗 Read Full Article
+                        </a>
                         {view === 'review' && (
                           <div style={{ display: 'flex', gap: '0.5rem' }}>
                             <button onClick={() => handleAction(mention.id, 'approved')} style={{ flex: 1, padding: '0.5rem', background: 'rgba(16, 185, 129, 0.2)', border: '1px solid rgba(16, 185, 129, 0.3)', borderRadius: '8px', color: '#6ee7b7', cursor: 'pointer', fontWeight: '600' }}>✓ Approve</button>
